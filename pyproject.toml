@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cache-tree"
+version = "0.1.0"
+description = "High-Throughput Test-Time Compute Scaling via Step-Level MCTS & KV-Cache Prefix Recycling"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Hrushikesh Ramilla", email = "ramillahrushikesh@gmail.com"}
+]
+dependencies = [
+    "numpy>=1.20.0",
+    "torch>=2.0.0",
+]
