@@ -141,3 +141,77 @@ class ThoughtTree:
         parent.children_ids.append(child_id)
         return child
 
+    def compute_uct(self, child: StepNode, parent_visits: int) -> float:
+        """
+        Computes normalized Upper Confidence Bound for Trees:
+        UCT(s, a) = normalized_Q(s, a) + c_puct * P(s, a) * sqrt(ln(N_parent)) / (1 + N_child)
+        """
+        if child.is_pruned:
+            return -float("inf")
+
+        # Normalize Q value to [0, 1] using tree-wide bounds
+        if self.config.normalize_q and self.q_max > self.q_min + self.config.epsilon:
+            norm_q = (child.q_value - self.q_min) / (self.q_max - self.q_min + self.config.epsilon)
+            norm_q = max(0.0, min(1.0, norm_q))
+        else:
+            norm_q = child.q_value
+
+        # Exploration bonus
+        exploration = (
+            self.config.c_puct
+            * child.prior_prob
+            * (math.sqrt(max(1.0, math.log(max(1, parent_visits)))) / (1.0 + child.visits))
+        )
+
+        return norm_q + exploration
+
+    def select_best_child(self, parent_id: int) -> Optional[StepNode]:
+        """
+        Selects the child with the highest UCT score among active (non-pruned) children.
+        Deterministic tie-breaking by highest prior prob.
+        """
+        parent = self.get_node(parent_id)
+        active_children = [
+            self.nodes[cid] for cid in parent.children_ids if not self.nodes[cid].is_pruned
+        ]
+        if not active_children:
+            return None
+
+        best_score = -float("inf")
+        best_child = None
+
+        for child in active_children:
+            score = self.compute_uct(child, parent.visits)
+            if score > best_score:
+                best_score = score
+                best_child = child
+            elif math.isclose(score, best_score, rel_tol=1e-9) and best_child is not None:
+                # Tie-breaking
+                if child.prior_prob > best_child.prior_prob:
+                    best_child = child
+
+        return best_child
+
+    def traverse_to_leaf(self) -> Tuple[StepNode, List[int]]:
+        """
+        Traverses the tree from root using UCT until an unexpanded or terminal leaf is reached.
+        Returns the leaf node and the sequence of node_ids traversed.
+        """
+        path: List[int] = [self.root_id]
+        curr = self.get_node(self.root_id)
+
+        while curr.children_ids and not curr.is_terminal and curr.status == NodeStatus.ACTIVE:
+            best_child = self.select_best_child(curr.node_id)
+            if best_child is None:
+                # All children are pruned; curr is effectively a dead-end
+                break
+            if best_child.visits == 0:
+                # Unvisited child, stop here to evaluate/rollout
+                curr = best_child
+                path.append(curr.node_id)
+                break
+            curr = best_child
+            path.append(curr.node_id)
+
+        return curr, path
+
