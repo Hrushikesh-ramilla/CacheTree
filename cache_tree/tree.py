@@ -215,3 +215,31 @@ class ThoughtTree:
 
         return curr, path
 
+    def backpropagate(self, leaf_id: int, terminal_value: float) -> None:
+        """
+        Propagates value back up the tree from leaf to root with step-efficiency discounting.
+        Updates visits, cumulative value, and tree min/max Q tracking.
+        """
+        leaf = self.get_node(leaf_id)
+        leaf_depth = leaf.depth
+        bounded_value = max(0.0, min(1.0, terminal_value))
+        gamma = self.config.gamma_discount
+
+        curr: Optional[StepNode] = leaf
+        while curr is not None:
+            curr.visits += 1
+            # Step efficiency discount: shorter paths preserve higher value
+            step_distance = max(0, leaf_depth - curr.depth)
+            discounted_val = bounded_value * (gamma ** step_distance)
+            curr.total_value += discounted_val
+
+            q = curr.q_value
+            if q < self.q_min:
+                self.q_min = q
+            if q > self.q_max:
+                self.q_max = q
+
+            if curr.parent_id is None:
+                break
+            curr = self.get_node(curr.parent_id)
+
