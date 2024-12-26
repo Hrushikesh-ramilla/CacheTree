@@ -72,3 +72,66 @@ def test_uct_computation_and_normalization():
     # Unvisited child c2 should have strong exploration incentive or c1 high Q
     assert best.node_id in [c1.node_id, c2.node_id]
 
+
+def test_branch_pruning():
+    tree = ThoughtTree(root_prompt="Problem")
+    c1 = tree.add_child(tree.root_id, "Good branch", [1])
+    c2 = tree.add_child(tree.root_id, "Bad branch", [2])
+    c2_sub = tree.add_child(c2.node_id, "Bad continuation", [3])
+
+    pruned_count = tree.prune_branch(c2.node_id)
+    assert pruned_count == 2
+    assert c2.is_pruned is True
+    assert c2_sub.is_pruned is True
+
+    # Best child must not select pruned branch
+    best = tree.select_best_child(tree.root_id)
+    assert best.node_id == c1.node_id
+
+
+def test_lowest_common_ancestor():
+    tree = ThoughtTree(root_prompt="Root")
+    # Tree topology:
+    #        0 (root)
+    #       / \
+    #      1   2
+    #     /     \
+    #    3       4
+    n1 = tree.add_child(0, "1", [1])
+    n2 = tree.add_child(0, "2", [2])
+    n3 = tree.add_child(n1.node_id, "3", [3])
+    n4 = tree.add_child(n2.node_id, "4", [4])
+
+    assert tree.lowest_common_ancestor(n3.node_id, n4.node_id) == 0
+    assert tree.lowest_common_ancestor(n3.node_id, n1.node_id) == n1.node_id
+    assert tree.lowest_common_ancestor(n3.node_id, n3.node_id) == n3.node_id
+
+
+def test_best_trajectory_selection():
+    tree = ThoughtTree(root_prompt="Root")
+    c1 = tree.add_child(0, "Good 1", [1])
+    c1_term = tree.add_child(
+        c1.node_id,
+        "Good 2: #### 42",
+        [2],
+        is_terminal=True,
+        solution="42",
+        status=NodeStatus.TERMINAL_SUCCESS,
+    )
+    tree.backpropagate(c1_term.node_id, terminal_value=1.0)
+
+    c2 = tree.add_child(0, "Bad 1", [3])
+    c2_fail = tree.add_child(
+        c2.node_id,
+        "Bad 2: #### 99",
+        [4],
+        is_terminal=True,
+        solution="99",
+        status=NodeStatus.TERMINAL_FAILURE,
+    )
+    tree.backpropagate(c2_fail.node_id, terminal_value=0.0)
+
+    best_traj = tree.get_best_trajectory()
+    assert len(best_traj) == 3
+    assert [n.node_id for n in best_traj] == [0, c1.node_id, c1_term.node_id]
+    assert best_traj[-1].solution == "42"
