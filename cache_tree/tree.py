@@ -243,3 +243,71 @@ class ThoughtTree:
                 break
             curr = self.get_node(curr.parent_id)
 
+    def prune_branch(self, node_id: int) -> int:
+        """
+        Prunes node_id and all its descendants. Returns count of pruned nodes.
+        """
+        to_prune: List[int] = [node_id]
+        pruned_count = 0
+
+        while to_prune:
+            nid = to_prune.pop()
+            node = self.get_node(nid)
+            if node.status != NodeStatus.PRUNED:
+                node.status = NodeStatus.PRUNED
+                pruned_count += 1
+            to_prune.extend(node.children_ids)
+
+        return pruned_count
+
+    def lowest_common_ancestor(self, id_a: int, id_b: int) -> int:
+        """
+        Finds the lowest common ancestor of two nodes.
+        Used by the TreeKVCacheManager to determine how much KV-cache can be reused.
+        """
+        ancestors_a: Set[int] = set()
+        curr: Optional[int] = id_a
+        while curr is not None:
+            ancestors_a.add(curr)
+            curr = self.nodes[curr].parent_id
+
+        curr_b: Optional[int] = id_b
+        while curr_b is not None:
+            if curr_b in ancestors_a:
+                return curr_b
+            curr_b = self.nodes[curr_b].parent_id
+
+        return self.root_id
+
+    def get_trajectory_from_root(self, node_id: int) -> List[StepNode]:
+        """Returns the full sequence of StepNodes from root to node_id."""
+        path: List[StepNode] = []
+        curr: Optional[StepNode] = self.get_node(node_id)
+        while curr is not None:
+            path.append(curr)
+            if curr.parent_id is None:
+                break
+            curr = self.get_node(curr.parent_id)
+        path.reverse()
+        return path
+
+    def get_best_trajectory(self) -> List[StepNode]:
+        """
+        Returns the optimal reasoning path from root to the highest-scoring terminal/leaf node.
+        Prefers successful terminal nodes, breaking ties by Q-value and visit counts.
+        """
+        # Find best terminal success node
+        terminal_successes = [
+            n for n in self.nodes.values() if n.status == NodeStatus.TERMINAL_SUCCESS and n.is_terminal
+        ]
+        if terminal_successes:
+            best_node = max(terminal_successes, key=lambda n: (n.q_value, n.visits, -n.depth))
+            return self.get_trajectory_from_root(best_node.node_id)
+
+        # Fallback to node with highest visits (most explored)
+        active_candidates = [n for n in self.nodes.values() if not n.is_pruned and n.node_id != self.root_id]
+        if not active_candidates:
+            return [self.get_node(self.root_id)]
+
+        best_node = max(active_candidates, key=lambda n: (n.visits, n.q_value, -n.depth))
+        return self.get_trajectory_from_root(best_node.node_id)
