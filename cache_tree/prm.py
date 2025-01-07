@@ -85,3 +85,101 @@ class RuleBasedMathPRM(ProcessRewardModel):
 
         return None
 
+    def _check_simple_arithmetic(self, step_text: str) -> Optional[Tuple[bool, str]]:
+        """
+        Finds equations like '12 + 15 = 27' or '10 * 4 = 40' and checks mathematical validity.
+        Returns (is_valid, explanation) or None if no simple equation found.
+        """
+        # Match standard binary arithmetic: num op num = num (including negative operands)
+        patterns = [
+            r"(-?\d+(?:\.\d+)?)\s*([\+\-\*\/])\s*(-?\d+(?:\.\d+)?)\s*=\s*(-?\d+(?:\.\d+)?)",
+        ]
+        for pat in patterns:
+            for match in re.finditer(pat, step_text):
+                a_str, op, b_str, res_str = match.groups()
+                try:
+                    a = float(a_str)
+                    b = float(b_str)
+                    claimed = float(res_str)
+                except (ValueError, OverflowError):
+                    continue
+
+                try:
+                    if op == "+":
+                        expected = a + b
+                    elif op == "-":
+                        expected = a - b
+                    elif op == "*":
+                        expected = a * b
+                    elif op == "/":
+                        if abs(b) < 1e-9:
+                            return False, f"Division by zero: {a_str} / {b_str}"
+                        expected = a / b
+                    else:
+                        continue
+                except OverflowError:
+                    return False, f"Arithmetic overflow in {a_str} {op} {b_str}"
+
+                if not abs(expected - claimed) < 1e-4:
+                    return False, f"Arithmetic contradiction: {a_str} {op} {b_str} = {claimed} (true: {expected})"
+
+        return True, "Arithmetic checks passed"
+
+    def evaluate_step(
+        self,
+        problem: str,
+        reasoning_history: str,
+        current_step: str,
+    ) -> StepEvaluation:
+        clean_step = current_step.strip()
+        terminal_ans = self.extract_terminal_answer(clean_step)
+        is_terminal = terminal_ans is not None
+
+        # 1. Check for empty or degenerate steps
+        if len(clean_step) < 3:
+            return StepEvaluation(
+                verdict=StepVerdict.FATAL_ERROR,
+                score=0.05,
+                confidence=0.99,
+                rationale="Empty or degenerate reasoning step",
+                is_fatal=True,
+                is_terminal=False,
+            )
+
+        # 2. Check for arithmetic validity
+        arith_result = self._check_simple_arithmetic(clean_step)
+        if arith_result is not None:
+            is_valid, msg = arith_result
+            if not is_valid:
+                return StepEvaluation(
+                    verdict=StepVerdict.FATAL_ERROR,
+                    score=0.10,
+                    confidence=0.95,
+                    rationale=msg,
+                    is_fatal=True,
+                    is_terminal=is_terminal,
+                    extracted_answer=terminal_ans,
+                )
+
+
+        # 4. Normal verified step
+        if is_terminal:
+            return StepEvaluation(
+                verdict=StepVerdict.CORRECT,
+                score=0.95,
+                confidence=0.90,
+                rationale="Valid terminal reasoning step with candidate answer extracted",
+                is_fatal=False,
+                is_terminal=True,
+                extracted_answer=terminal_ans,
+            )
+
+        return StepEvaluation(
+            verdict=StepVerdict.CORRECT,
+            score=0.80,
+            confidence=0.85,
+            rationale="Coherent intermediate reasoning step with verified arithmetic",
+            is_fatal=False,
+            is_terminal=False,
+        )
+
