@@ -161,6 +161,17 @@ class RuleBasedMathPRM(ProcessRewardModel):
                     extracted_answer=terminal_ans,
                 )
 
+        # 3. Check for repetitive loop (stuck agent hallucinating identical step)
+        if clean_step in reasoning_history:
+            return StepEvaluation(
+                verdict=StepVerdict.SUSPICIOUS,
+                score=0.25,
+                confidence=0.85,
+                rationale="Step is an exact duplicate of previous reasoning step (cyclical drift)",
+                is_fatal=False,
+                is_terminal=is_terminal,
+                extracted_answer=terminal_ans,
+            )
 
         # 4. Normal verified step
         if is_terminal:
