@@ -194,3 +194,89 @@ class RuleBasedMathPRM(ProcessRewardModel):
             is_terminal=False,
         )
 
+
+class HybridMathPRM(ProcessRewardModel):
+    """
+    Dual-Head Hybrid Process Reward Model:
+    1. Symbolic Head: Fast, deterministic O(1) arithmetic & division-by-zero validation (RuleBasedMathPRM).
+    2. Neural Logit Head: Evaluates semantic correctness using model log-probabilities on (A) Yes vs (B) No:
+       P(Yes) = exp(z_A) / (exp(z_A) + exp(z_B))
+       Intercepts subtle logic inversions and false derivations that bypass simple arithmetic checking.
+    """
+
+    def __init__(
+        self,
+        symbolic_prm: Optional[RuleBasedMathPRM] = None,
+        model: Optional[Any] = None,
+        tokenizer: Optional[Any] = None,
+        device: Optional[str] = None,
+        neural_threshold: float = 0.35,
+    ):
+        self.symbolic_prm = symbolic_prm or RuleBasedMathPRM()
+        self.model = model
+        self.tokenizer = tokenizer
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.neural_threshold = neural_threshold
+
+    def extract_terminal_answer(self, step_text: str) -> Optional[str]:
+        return self.symbolic_prm.extract_terminal_answer(step_text)
+
+    def evaluate_step(
+        self,
+        problem: str,
+        reasoning_history: str,
+        current_step: str,
+    ) -> StepEvaluation:
+        # 1. Fast Symbolic Pass
+        sym_eval = self.symbolic_prm.evaluate_step(problem, reasoning_history, current_step)
+        if sym_eval.is_fatal:
+            return sym_eval
+
+        # 2. Neural Verification Pass (if model & tokenizer provided)
+        if self.model is not None and self.tokenizer is not None:
+            eval_prompt = (
+                f"Problem: {problem}\n"
+                f"History:\n{reasoning_history}\n"
+                f"Step to evaluate: {current_step}\n\n"
+                f"Question: Is the step mathematically and logically correct?\n"
+                f"(A) Yes\n(B) No\nAnswer: ("
+            )
+            try:
+                inputs = self.tokenizer(eval_prompt, return_tensors="pt").to(self.device)
+                with torch.no_grad():
+                    logits = self.model(**inputs).logits[:, -1, :]
+
+                a_id = self.tokenizer.encode("A", add_special_tokens=False)[-1]
+                b_id = self.tokenizer.encode("B", add_special_tokens=False)[-1]
+
+                z_a = logits[0, a_id].item()
+                z_b = logits[0, b_id].item()
+                max_z = max(z_a, z_b)
+                p_yes = math.exp(z_a - max_z) / (math.exp(z_a - max_z) + math.exp(z_b - max_z))
+
+                if p_yes < self.neural_threshold:
+                    return StepEvaluation(
+                        verdict=StepVerdict.SUSPICIOUS,
+                        score=round(p_yes * 0.5, 4),
+                        confidence=0.85,
+                        rationale=f"Neural verifier rejected step: P(Correct) = {p_yes:.3f} < threshold {self.neural_threshold}",
+                        is_fatal=False,
+                        is_terminal=sym_eval.is_terminal,
+                        extracted_answer=sym_eval.extracted_answer,
+                    )
+
+                hybrid_score = round(0.5 * sym_eval.score + 0.5 * p_yes, 4)
+                return StepEvaluation(
+                    verdict=StepVerdict.CORRECT,
+                    score=hybrid_score,
+                    confidence=0.90,
+                    rationale=f"Verified by Symbolic Check & Neural Logit (P(Yes)={p_yes:.3f})",
+                    is_fatal=False,
+                    is_terminal=sym_eval.is_terminal,
+                    extracted_answer=sym_eval.extracted_answer,
+                )
+            except Exception as e:
+                # Fallback to symbolic evaluation if neural logit fails
+                return sym_eval
+
+        return sym_eval
