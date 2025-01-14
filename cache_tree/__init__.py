@@ -2,7 +2,18 @@
 CacheTree: High-Throughput Test-Time Compute Scaling via Step-Level MCTS & KV-Cache Prefix Recycling.
 """
 
-from .tree import StepNode, ThoughtTree, NodeStatus, UCTConfig
+from .tree import (
+    StepNode,
+    ThoughtTree,
+    NodeStatus,
+    UCTConfig,
+)
+from .prm import (
+    ProcessRewardModel,
+    StepVerdict,
+    StepEvaluation,
+    RuleBasedMathPRM,
+    HybridMathPRM,
+)
 
 __version__ = "0.1.0"
-__all__ = ["StepNode", "ThoughtTree", "NodeStatus", "UCTConfig"]
