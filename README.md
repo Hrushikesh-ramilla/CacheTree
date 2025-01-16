@@ -44,3 +44,7 @@ In multi-step reasoning, test-time compute models explore branching thoughts and
   $$N(u) \ge \sum_{c \in \text{children}(u)} N(c), \quad \text{parent}(u) < u$$
 
 ### 2. Calibrated Step-Level Process Reward Model (PRM)
+- Evaluates individual reasoning steps as they are generated.
+- **Early Branch Pruning:** Detects algebraic contradictions, division by zero, and cyclical drift immediately at Step 1 or 2, instantly pruning dead-end subtrees before wasting GPU tokens on invalid 10-step rollouts.
+
+### 3. Tree-Structured KV-Cache Manager (`TreeKVCacheManager`)
