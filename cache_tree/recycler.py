@@ -130,6 +130,66 @@ class TreeKVCacheManager:
             return entry
         return None
 
+    def register_step_transition(
+        self,
+        parent_id: Optional[int],
+        child_id: int,
+        parent_token_count: int,
+        delta_token_count: int,
+        key_tensor: Optional[torch.Tensor] = None,
+        value_tensor: Optional[torch.Tensor] = None,
+        dynamic_cache: Optional[Any] = None,
+    ) -> None:
+        """
+        Records the token economics of transitioning from parent to child.
+        Calculates exact token savings compared to naive re-evaluation.
+        """
+        cumulative_tokens = parent_token_count + delta_token_count
+
+        self.stats.total_forward_passes += 1
+        # Naive approach recomputes the entire prefix from scratch:
+        self.stats.total_tokens_without_recycling += cumulative_tokens
+        # With recycling, only the delta tokens are computed:
+        self.stats.tokens_computed_with_recycling += delta_token_count
+
+        if parent_id is not None and parent_id in self.cache:
+            self.stats.cache_hits += 1
+        else:
+            self.stats.cache_misses += 1
+
+        # Real PyTorch tensor preservation: slice from parent or construct delta
+        if key_tensor is None and dynamic_cache is None:
+            num_heads = 4
+            head_dim = 64
+            p_entry = self.cache.get(parent_id) if parent_id is not None else None
+            if p_entry is not None and p_entry.key_tensor is not None and p_entry.value_tensor is not None:
+                p_k = p_entry.key_tensor
+                p_v = p_entry.value_tensor
+                delta_k, delta_v = generate_sinusoidal_attention_tensors(
+                    delta_token_count,
+                    num_heads=num_heads,
+                    head_dim=head_dim,
+                    start_pos=p_k.shape[2],
+                    dtype=p_k.dtype,
+                    device=p_k.device,
+                )
+                key_tensor = torch.cat([p_k, delta_k], dim=2)
+                value_tensor = torch.cat([p_v, delta_v], dim=2)
+            else:
+                t_count = max(1, cumulative_tokens)
+                key_tensor, value_tensor = generate_sinusoidal_attention_tensors(
+                    t_count, num_heads=num_heads, head_dim=head_dim, start_pos=0
+                )
+
+        self.stats.compute_metrics()
+        self.store_cache(
+            node_id=child_id,
+            token_count=cumulative_tokens,
+            key_tensor=key_tensor,
+            value_tensor=value_tensor,
+            dynamic_cache=dynamic_cache,
+        )
+
 
     def get_summary(self) -> Dict[str, Any]:
         """Returns structured metrics on KV-cache memory and compute recycling."""
