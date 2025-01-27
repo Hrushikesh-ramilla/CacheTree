@@ -190,6 +190,24 @@ class TreeKVCacheManager:
             dynamic_cache=dynamic_cache,
         )
 
+    def rewind_to_lca(
+        self,
+        current_node_id: int,
+        target_node_id: int,
+        tree: Any,
+    ) -> Tuple[int, int]:
+        """
+        Computes Lowest Common Ancestor (LCA) between current and target node,
+        returning the LCA node_id and the count of prefix tokens preserved.
+        """
+        lca_id = tree.lowest_common_ancestor(current_node_id, target_node_id)
+        self.stats.rewind_operations += 1
+
+        lca_node = tree.get_node(lca_id)
+        preserved_tokens = len(lca_node.cumulative_tokens)
+
+        self.active_node_id = lca_id
+        return lca_id, preserved_tokens
 
     def get_summary(self) -> Dict[str, Any]:
         """Returns structured metrics on KV-cache memory and compute recycling."""
