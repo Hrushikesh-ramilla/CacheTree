@@ -73,6 +73,19 @@ class KVCacheEntry:
     last_accessed: float = dataclasses.field(default_factory=time.time)
 
 
+def clone_dynamic_cache(cache: Any) -> Any:
+    """Clones a transformers DynamicCache object layer-by-layer."""
+    if cache is None:
+        return None
+    try:
+        from transformers.cache_utils import DynamicCache
+        new_cache = DynamicCache()
+        for layer_idx, (k, v) in enumerate(zip(cache.key_cache, cache.value_cache)):
+            new_cache.update(k.clone(), v.clone(), layer_idx=layer_idx)
+        return new_cache
+    except Exception:
+        return None
+
 
 class TreeKVCacheManager:
     """
@@ -121,6 +134,18 @@ class TreeKVCacheManager:
         )
         self.active_node_id = node_id
 
+    def clone_and_crop_dynamic_cache(self, source_node_id: int, target_length: int) -> Optional[Any]:
+        """
+        Retrieves the DynamicCache of source_node_id, clones it,
+        and crops to target_length for zero-recomputation branching.
+        """
+        entry = self.get_cache(source_node_id)
+        if entry is None or entry.dynamic_cache is None:
+            return None
+        cloned = clone_dynamic_cache(entry.dynamic_cache)
+        if cloned is not None and hasattr(cloned, "crop"):
+            cloned.crop(target_length)
+        return cloned
 
     def get_cache(self, node_id: int) -> Optional[KVCacheEntry]:
         """Retrieves cache entry for node_id and updates access timestamp."""
