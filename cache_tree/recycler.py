@@ -250,3 +250,36 @@ class TreeKVCacheManager:
             "active_cached_nodes": len(self.cache),
         }
 
+
+class TokenRecyclingBuffer:
+    """
+    Tracks empirical bigram / n-gram token transition frequencies
+    observed during reasoning to speculate candidate tokens without a draft model.
+    """
+
+    def __init__(self, vocab_size: int = 32000, top_k: int = 8):
+        self.vocab_size = vocab_size
+        self.top_k = top_k
+        # Sparse transitions dictionary: token_id -> Dict[next_token_id, count]
+        self.transitions: Dict[int, Dict[int, int]] = {}
+
+    def update_from_sequence(self, token_ids: List[int]) -> None:
+        """Updates transition counts from an observed token sequence."""
+        for i in range(len(token_ids) - 1):
+            src = token_ids[i]
+            dst = token_ids[i + 1]
+            if src not in self.transitions:
+                self.transitions[src] = {}
+            self.transitions[src][dst] = self.transitions[src].get(dst, 0) + 1
+
+    def predict_next_tokens(self, last_token_id: int, k: Optional[int] = None) -> List[int]:
+        """Predicts top-k most frequent subsequent tokens for speculative drafting."""
+        limit = k or self.top_k
+        if last_token_id not in self.transitions:
+            return []
+        next_map = self.transitions[last_token_id]
+        sorted_tokens = sorted(next_map.keys(), key=lambda t: next_map[t], reverse=True)
+        return sorted_tokens[:limit]
+
+    def clear(self) -> None:
+        self.transitions.clear()
