@@ -48,3 +48,63 @@ def test_token_recycling_savings_ratio():
     assert pytest.approx(stats.recycling_efficiency, rel=1e-3) == (200 / 240)
     assert stats.cache_hits == 2
 
+
+def test_deep_tree_recycling_efficiency():
+    mgr = TreeKVCacheManager()
+    tree = ThoughtTree(root_prompt="Root", root_tokens=list(range(50)))
+    mgr.store_cache(tree.root_id, token_count=50)
+
+    # Build a balanced binary tree of depth 3
+    # Level 1: 2 nodes (delta=10)
+    # Level 2: 4 nodes (delta=10)
+    current_parents = [tree.root_id]
+    for depth in range(1, 4):
+        next_parents = []
+        for p in current_parents:
+            parent_node = tree.get_node(p)
+            for branch in range(2):
+                c = tree.add_child(p, f"d{depth}_b{branch}", list(range(10)))
+                mgr.register_step_transition(
+                    parent_id=p,
+                    child_id=c.node_id,
+                    parent_token_count=len(parent_node.cumulative_tokens),
+                    delta_token_count=10,
+                )
+                next_parents.append(c.node_id)
+        current_parents = next_parents
+
+    summary = mgr.get_summary()
+    assert summary["total_forward_passes"] == 2 + 4 + 8  # 14
+    # With deep prefix sharing, efficiency must be well over 70%
+    assert summary["recycling_efficiency_pct"] > 70.0
+
+
+def test_rewind_to_lca():
+    mgr = TreeKVCacheManager()
+    tree = ThoughtTree(root_prompt="Root", root_tokens=list(range(20)))
+
+    # Root -> Node 1 -> Node 2
+    # Root -> Node 3
+    n1 = tree.add_child(tree.root_id, "1", list(range(10)))
+    n2 = tree.add_child(n1.node_id, "2", list(range(10)))
+    n3 = tree.add_child(tree.root_id, "3", list(range(10)))
+
+    lca_id, preserved_tokens = mgr.rewind_to_lca(
+        current_node_id=n2.node_id,
+        target_node_id=n3.node_id,
+        tree=tree,
+    )
+
+    assert lca_id == tree.root_id
+    assert preserved_tokens == 20
+    assert mgr.active_node_id == tree.root_id
+
+
+def test_token_recycling_buffer():
+    buf = TokenRecyclingBuffer(vocab_size=1000, top_k=3)
+    # Observe sequence where 10 is followed by 20 twice and 30 once
+    buf.update_from_sequence([10, 20, 10, 20, 10, 30])
+    preds = buf.predict_next_tokens(10)
+    assert preds[0] == 20
+    assert preds[1] == 30
+    assert len(preds) == 2
