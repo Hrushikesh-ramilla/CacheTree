@@ -48,3 +48,9 @@ In multi-step reasoning, test-time compute models explore branching thoughts and
 - **Early Branch Pruning:** Detects algebraic contradictions, division by zero, and cyclical drift immediately at Step 1 or 2, instantly pruning dead-end subtrees before wasting GPU tokens on invalid 10-step rollouts.
 
 ### 3. Tree-Structured KV-Cache Manager (`TreeKVCacheManager`)
+- **Prefix Tensor Sharing:** When expanding $K$ children from node $u$, the KV tensor $\mathbf{K}_u, \mathbf{V}_u$ is frozen and shared. Only $\Delta \mathbf{K}_{v_k}, \Delta \mathbf{V}_{v_k}$ are computed.
+- **LCA Rewinding:** Backtracking between disjoint branches rewinds to the Lowest Common Ancestor in $\mathcal{O}(\text{depth})$ time, reusing common prompt and reasoning prefixes.
+- **Token Recycling Theorem:**
+  $$\text{Efficiency} = \frac{\text{Tokens Saved}}{\text{Naive Tokens}} = 1 - \frac{\sum |\Delta \mathbf{t}_{v_k}|}{\sum (L_u + |\Delta \mathbf{t}_{v_k}|)} \ge 80\%$$
+
+### 4. Machine-Precision Exactness Proof Certification
