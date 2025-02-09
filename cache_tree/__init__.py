@@ -15,5 +15,11 @@ from .prm import (
     RuleBasedMathPRM,
     HybridMathPRM,
 )
+from .recycler import (
+    TreeKVCacheManager,
+    KVCacheEntry,
+    TokenRecyclingBuffer,
+    RecyclingStats,
+)
 
 __version__ = "0.1.0"
