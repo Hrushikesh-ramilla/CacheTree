@@ -103,6 +103,13 @@ class TestTimeComputeEngine:
             leaf, path = tree.traverse_to_leaf()
 
             # 2. Rewind KV-Cache to Lowest Common Ancestor
+            if current_active_node != leaf.node_id:
+                lca_id, preserved = self.kv_manager.rewind_to_lca(
+                    current_node_id=current_active_node,
+                    target_node_id=leaf.node_id,
+                    tree=tree,
+                )
+                current_active_node = leaf.node_id
 
             # 3. Handle terminal or pruned leaf
             if leaf.is_terminal:
