@@ -195,11 +195,57 @@ class TestTimeComputeEngine:
         best_trajectory_nodes = tree.get_best_trajectory()
         best_steps = [n.thought_step for n in best_trajectory_nodes]
 
+        # Weighted Self-Consistency Consensus Aggregation
+        terminal_nodes = [
+            n for n in tree.nodes.values()
+            if n.is_terminal and n.solution is not None and not n.is_pruned
+        ]
 
-        best_solution = best_trajectory_nodes[-1].solution if best_trajectory_nodes else None
+        consensus_scores: Dict[str, float] = {}
+        for n in terminal_nodes:
+            ans = str(n.solution).strip()
+            weight = max(1, n.visits) * max(0.01, n.q_value)
+            consensus_scores[ans] = consensus_scores.get(ans, 0.0) + weight
+
+        total_weight = sum(consensus_scores.values())
+        if total_weight > 0:
+            consensus_dist = {
+                ans: round(w / total_weight, 4) for ans, w in consensus_scores.items()
+            }
+            ranked = sorted(consensus_dist.items(), key=lambda kv: kv[1], reverse=True)
+            best_solution = ranked[0][0]
+            top_confidence = ranked[0][1]
+            runner_up_conf = ranked[1][1] if len(ranked) > 1 else 0.0
+            margin = round(top_confidence - runner_up_conf, 4)
+
+            # Synchronize best_trajectory with the winning consensus solution's derivation path
+            matching_nodes = [
+                n for n in terminal_nodes if str(n.solution).strip() == best_solution
+            ]
+            best_matching_node = max(
+                matching_nodes,
+                key=lambda n: max(1, n.visits) * max(0.01, n.q_value),
+            )
+            best_trajectory_nodes = tree.get_trajectory_from_root(best_matching_node.node_id)
+            best_steps = [n.thought_step for n in best_trajectory_nodes]
+        else:
+            best_solution = best_trajectory_nodes[-1].solution if best_trajectory_nodes else None
+            consensus_dist = {}
+            top_confidence = 0.0
+            margin = 0.0
+
         return ReasoningResult(
-            problem=problem, best_solution=best_solution, best_trajectory=best_steps,
-            total_search_rounds=round_idx + 1, total_nodes_expanded=len(tree.nodes),
-            pruned_branches_count=pruned_count, terminal_solutions_found=terminal_solutions,
-            recycling_metrics=self.kv_manager.get_summary(), time_elapsed_seconds=elapsed, tree=tree,
+            problem=problem,
+            best_solution=best_solution,
+            best_trajectory=best_steps,
+            total_search_rounds=round_idx + 1,
+            total_nodes_expanded=len(tree.nodes),
+            pruned_branches_count=pruned_count,
+            terminal_solutions_found=terminal_solutions,
+            recycling_metrics=self.kv_manager.get_summary(),
+            time_elapsed_seconds=elapsed,
+            tree=tree,
+            consensus_distribution=consensus_dist,
+            consensus_confidence=top_confidence,
+            margin_of_victory=margin,
         )
