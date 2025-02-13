@@ -1,9 +1,15 @@
 """
-Tests for Path-Efficiency Discounting.
+Tests for Path-Efficiency Discounting and Weighted Self-Consistency Consensus.
 """
 
 import pytest
 from cache_tree.tree import ThoughtTree, NodeStatus, UCTConfig
+from cache_tree.engine import (
+    TestTimeComputeEngine,
+    EngineConfig,
+    CandidateStepProposal,
+    ReasoningResult,
+)
 
 
 def test_gamma_discounting_in_backpropagation():
@@ -34,3 +40,52 @@ def test_gamma_discounting_in_backpropagation():
 
     # root (depth 0, dist 3): initial 0.5 + 1.0 * (0.9^3) = 0.5 + 0.729 = 1.229
     assert pytest.approx(tree.get_node(tree.root_id).total_value, rel=1e-4) == 0.5 + (0.9 ** 3)
+
+
+def test_weighted_self_consistency_consensus():
+    """
+    Verifies that TestTimeComputeEngine aggregates multiple terminal solutions,
+    weighting answers by cumulative visit-Q confidence to pick the true consensus.
+    """
+    def multi_path_proposer(problem, history, b_factor):
+        step_idx = len(history) + 1
+        if step_idx == 1:
+            return [
+                CandidateStepProposal("Step 1: Path A", [1], prior_prob=0.7),
+                CandidateStepProposal("Step 1: Path B", [2], prior_prob=0.3),
+            ]
+        elif step_idx == 2:
+            last = history[-1]
+            if "Path A" in last:
+                # Path A produces the correct answer '48'
+                return [
+                    CandidateStepProposal("Step 2A: Answer is 48. #### 48", [3], prior_prob=0.9),
+                ]
+            else:
+                # Path B produces an alternative answer '50'
+                return [
+                    CandidateStepProposal("Step 2B: Answer is 50. #### 50", [4], prior_prob=0.8),
+                ]
+        return []
+
+    engine = TestTimeComputeEngine(
+        config=EngineConfig(
+            max_search_rounds=6,
+            branching_factor=2,
+            early_stop_on_success=False,  # Allow exploring multiple paths
+        )
+    )
+
+    res = engine.solve(
+        problem="Calculate Janet eggs",
+        step_proposer_fn=multi_path_proposer,
+        initial_tokens=[1, 2],
+    )
+
+    assert isinstance(res, ReasoningResult)
+    # The higher-prior / higher-Q path (48) must dominate the consensus
+    assert res.best_solution == "48"
+    assert "48" in res.consensus_distribution
+    assert res.consensus_distribution["48"] > 0.50
+    assert res.consensus_confidence > 0.50
+    assert res.margin_of_victory >= 0.0
