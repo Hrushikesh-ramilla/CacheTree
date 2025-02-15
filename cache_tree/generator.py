@@ -63,10 +63,11 @@ class HuggingFaceStepProposer:
             active_id = getattr(self.kv_manager, "active_node_id", None)
             if active_id is not None:
                 # Crop to max(1, prompt_len - 1) so generate() has at least 1 prompt token
-                base_pkv = self.kv_manager.clone_and_crop_dynamic_cache(active_id, prompt_len)
+                # to initialize cache_position without 0-dim IndexError.
+                base_pkv = self.kv_manager.clone_and_crop_dynamic_cache(active_id, max(1, prompt_len - 1))
 
         for _ in range(branching_factor):
-            pkv_branch = base_pkv
+            pkv_branch = clone_dynamic_cache(base_pkv) if base_pkv is not None else None
             gen_kwargs: Dict[str, Any] = {
                 "max_new_tokens": self.max_step_tokens,
                 "do_sample": True,
