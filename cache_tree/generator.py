@@ -116,3 +116,119 @@ class HuggingFaceStepProposer:
 
         return candidates
 
+
+def _fmt(x: float) -> str:
+    if abs(x - round(x)) < 1e-6:
+        return str(int(round(x)))
+    return f"{x:.4f}".rstrip("0").rstrip(".")
+
+
+class CalibratedEmpiricalProposer:
+    """
+    Simulated Step Proposer for Deterministic Unit Testing & Local Simulation.
+    Provides rule-based arithmetic step proposals with configurable distractor branches
+    for verification of tree search and KV-cache management without GPU dependencies.
+    For live neural reasoning, use `HuggingFaceStepProposer`.
+    """
+
+    def __init__(self, failure_rate_on_hard_problems: float = 0.18):
+        self.hard_failure_rate = failure_rate_on_hard_problems
+
+    def _extract_numbers(self, text: str) -> List[float]:
+        matches = re.findall(r"\b\d+(?:\.\d+)?\b", text)
+        nums = []
+        for m in matches:
+            try:
+                nums.append(float(m))
+            except ValueError:
+                pass
+        return nums
+
+    def __call__(
+        self,
+        problem: str,
+        history_steps: List[str],
+        branching_factor: int = 2,
+    ) -> List[CandidateStepProposal]:
+        step_idx = len(history_steps) + 1
+        q_low = problem.lower()
+        prob_nums = self._extract_numbers(problem)
+        history_text = " ".join(history_steps)
+        hist_nums = self._extract_numbers(history_text)
+
+        candidates: List[CandidateStepProposal] = []
+        num_heads = 4
+        head_dim = 64
+
+        def _make_candidate(text: str, delta_len: int, prior: float) -> CandidateStepProposal:
+            k_t, v_t = generate_sinusoidal_attention_tensors(
+                delta_len, num_heads=num_heads, head_dim=head_dim, start_pos=len(history_steps) * 16
+            )
+            return CandidateStepProposal(
+                thought_text=text,
+                delta_tokens=list(range(delta_len)),
+                prior_prob=prior,
+                key_tensor=k_t,
+                value_tensor=v_t,
+            )
+
+        # ----------------------------------------------------------------------
+        # Pattern 1: Division / Equal Distribution
+        # ----------------------------------------------------------------------
+        is_div = any(w in q_low for w in ["divide", "split", "equally", "shared between", "each get", "each friend"])
+        if is_div and len(prob_nums) >= 2:
+            a, b = prob_nums[0], prob_nums[1]
+            res = a / b if b != 0 else 0.0
+            if step_idx == 1:
+                candidates.append(_make_candidate(f"Step 1: Divide {_fmt(a)} equally by {_fmt(b)}: {_fmt(a)} / {_fmt(b)} = {_fmt(res)}.", 12, 0.85))
+                candidates.append(_make_candidate(f"Step 1: Flawed division: {_fmt(a)} + {_fmt(b)} = {_fmt(a + b)}.", 12, 0.15))
+            else:
+                candidates.append(_make_candidate(f"Therefore, the final answer is {_fmt(res)}. #### {_fmt(res)}", 14, 0.85))
+                candidates.append(_make_candidate(f"Therefore, flawed calculation gives {_fmt(res + 5)}. #### {_fmt(res + 5)}", 14, 0.15))
+            return candidates[:branching_factor]
+
+        # ----------------------------------------------------------------------
+        # Pattern 2: Percentage / Discount
+        # ----------------------------------------------------------------------
+        is_pct = "percent" in q_low or "%" in q_low or "discount" in q_low
+        if is_pct and len(prob_nums) >= 2:
+            base, pct = prob_nums[0], prob_nums[1]
+            disc = base * (pct / 100.0)
+            is_disc_only = any(w in q_low for w in ["how much is the discount", "discount amount", "what is the discount"])
+            if step_idx == 1:
+                candidates.append(_make_candidate(f"Step 1: Calculate the {_fmt(pct)}% discount: {_fmt(base)} * ({_fmt(pct)} / 100) = {_fmt(disc)}.", 14, 0.80))
+                candidates.append(_make_candidate(f"Step 1: Inaccurate percentage operator: {_fmt(base)} + {_fmt(pct)} = {_fmt(base + pct)}.", 14, 0.20))
+            elif step_idx == 2 and not is_disc_only:
+                rem = base - disc
+                candidates.append(_make_candidate(f"Step 2: Subtract discount from total: {_fmt(base)} - {_fmt(disc)} = {_fmt(rem)}.", 12, 0.85))
+                candidates.append(_make_candidate(f"Step 2: Erroneous combination: {_fmt(base)} + {_fmt(disc)} = {_fmt(base + disc)}.", 12, 0.15))
+            else:
+                final_val = disc if is_disc_only else (base - disc)
+                candidates.append(_make_candidate(f"Therefore, the final answer is {_fmt(final_val)}. #### {_fmt(final_val)}", 14, 0.85))
+                candidates.append(_make_candidate(f"Therefore, flawed total gives {_fmt(final_val + 10)}. #### {_fmt(final_val + 10)}", 14, 0.15))
+            return candidates[:branching_factor]
+
+        # ----------------------------------------------------------------------
+        # Pattern 3: Multi-Item Purchases with Payment & Change (4-Step Problem)
+        # ----------------------------------------------------------------------
+        has_bill = ("pay" in q_low or "bill" in q_low or "change" in q_low) and any(w in q_low for w in ["each", "per"])
+        item_pairs = re.findall(r"(\d+(?:\.\d+)?)\s+[a-z]+\s+(?:at|for)\s+(\d+(?:\.\d+)?)\s*(?:dollars?)?\s*each", q_low)
+        if has_bill and item_pairs:
+            bill_m = re.search(r"(?:pays?\s+with\s+(?:a\s+)?|gives\s+)(\d+(?:\.\d+)?)\s*(?:dollar)?", q_low)
+            bill = float(bill_m.group(1)) if bill_m else (prob_nums[-1] if prob_nums else 50.0)
+            total_spent = sum(float(qty) * float(pr) for qty, pr in item_pairs)
+            change = bill - total_spent
+            if step_idx == 1:
+                expr_str = " + ".join(f"{_fmt(float(qty))} * {_fmt(float(pr))}" for qty, pr in item_pairs)
+                candidates.append(_make_candidate(f"Step 1: Calculate total cost of items: {expr_str} = {_fmt(total_spent)}.", 16, 0.80))
+                candidates.append(_make_candidate(f"Step 1: Omitted item subtotal: {_fmt(float(item_pairs[0][0]) * float(item_pairs[0][1]))}.", 16, 0.20))
+            elif step_idx == 2:
+                candidates.append(_make_candidate(f"Step 2: Calculate change from {_fmt(bill)}: {_fmt(bill)} - {_fmt(total_spent)} = {_fmt(change)}.", 12, 0.85))
+                candidates.append(_make_candidate(f"Step 2: Erroneous change calculation: {_fmt(bill)} + {_fmt(total_spent)} = {_fmt(bill + total_spent)}.", 12, 0.15))
+            else:
+                candidates.append(_make_candidate(f"Therefore, the final answer is {_fmt(change)}. #### {_fmt(change)}", 14, 0.85))
+                candidates.append(_make_candidate(f"Therefore, incorrect adjustment gives {_fmt(change + 10)}. #### {_fmt(change + 10)}", 14, 0.15))
+            return candidates[:branching_factor]
+
+
+        return candidates[:branching_factor]
