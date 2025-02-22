@@ -21,5 +21,10 @@ from .recycler import (
     TokenRecyclingBuffer,
     RecyclingStats,
 )
+from .engine import (
+    TestTimeComputeEngine,
+    EngineConfig,
+    ReasoningResult,
+)
 
 __version__ = "0.1.0"
