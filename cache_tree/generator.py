@@ -230,5 +230,78 @@ class CalibratedEmpiricalProposer:
                 candidates.append(_make_candidate(f"Therefore, incorrect adjustment gives {_fmt(change + 10)}. #### {_fmt(change + 10)}", 14, 0.15))
             return candidates[:branching_factor]
 
+        # ----------------------------------------------------------------------
+        # Pattern 4: Multi-Step Subtraction / Deductions (Gives X, Gives Y, How many left?)
+        # ----------------------------------------------------------------------
+        is_left = any(w in q_low for w in ["left", "remain", "remainder"])
+        gives_away = any(w in q_low for w in ["gives", "eats", "spent", "sold", "cuts", "lost"])
+        if is_left and gives_away and len(prob_nums) >= 3:
+            initial = prob_nums[0]
+            subtractions = prob_nums[1:]
+            tot_sub = sum(subtractions)
+            rem = initial - tot_sub
+            if step_idx == 1:
+                sub_str = " + ".join(_fmt(x) for x in subtractions)
+                candidates.append(_make_candidate(f"Step 1: Combine amounts deducted: {sub_str} = {_fmt(tot_sub)}.", 14, 0.80))
+                mult_sub = 1.0
+                for x in subtractions:
+                    mult_sub *= x
+                candidates.append(_make_candidate(f"Step 1: First, compute the group quantity: {_fmt(subtractions[0])} * {_fmt(subtractions[1])} = {_fmt(mult_sub)}.", 14, 0.20))
+            elif step_idx == 2:
+                candidates.append(_make_candidate(f"Step 2: Subtract from initial total: {_fmt(initial)} - {_fmt(tot_sub)} = {_fmt(rem)}.", 12, 0.85))
+                candidates.append(_make_candidate(f"Step 2: Erroneous addition: {_fmt(initial)} + {_fmt(tot_sub)} = {_fmt(initial + tot_sub)}.", 12, 0.15))
+            else:
+                candidates.append(_make_candidate(f"Therefore, the final answer is {_fmt(rem)}. #### {_fmt(rem)}", 14, 0.85))
+                candidates.append(_make_candidate(f"Therefore, flawed remainder is {_fmt(rem + 10)}. #### {_fmt(rem + 10)}", 14, 0.15))
+            return candidates[:branching_factor]
+
+        # ----------------------------------------------------------------------
+        # Pattern 5: Decimal or Integer 2-Number Subtraction / Difference
+        # ----------------------------------------------------------------------
+        if is_left and len(prob_nums) == 2:
+            a, b = prob_nums[0], prob_nums[1]
+            diff = a - b
+            if step_idx == 1:
+                candidates.append(_make_candidate(f"Step 1: Calculate {_fmt(a)} - {_fmt(b)} = {_fmt(diff)}.", 12, 0.85))
+                candidates.append(_make_candidate(f"Step 1: Inaccurate addition: {_fmt(a)} + {_fmt(b)} = {_fmt(a + b)}.", 12, 0.15))
+            else:
+                candidates.append(_make_candidate(f"Therefore, the final answer is {_fmt(diff)}. #### {_fmt(diff)}", 14, 0.85))
+                candidates.append(_make_candidate(f"Therefore, erroneous calculation gives {_fmt(diff + 5)}. #### {_fmt(diff + 5)}", 14, 0.15))
+            return candidates[:branching_factor]
+
+        # ----------------------------------------------------------------------
+        # Terminal Step Default
+        # ----------------------------------------------------------------------
+        if step_idx >= 3 or (step_idx == 2 and len(prob_nums) <= 2):
+            last_val = hist_nums[-1] if hist_nums else (prob_nums[-1] if prob_nums else 42.0)
+            candidates.append(_make_candidate(f"Therefore, the final answer is {_fmt(last_val)}. #### {_fmt(last_val)}", 14, 0.80))
+            candidates.append(_make_candidate(f"Therefore, accounting for adjustments gives {_fmt(last_val + 10)}. #### {_fmt(last_val + 10)}", 14, 0.20))
+            return candidates[:branching_factor]
+
+        # ----------------------------------------------------------------------
+        # Pattern 6: Standard Multi-Quantity Grouping (A * B + C)
+        # ----------------------------------------------------------------------
+        if step_idx == 1:
+            if len(prob_nums) >= 3:
+                a, b = prob_nums[1], prob_nums[2]
+                prod = a * b
+                candidates.append(_make_candidate(f"Step 1: First, compute the group quantity: {_fmt(a)} * {_fmt(b)} = {_fmt(prod)}.", 12, 0.75))
+                candidates.append(_make_candidate(f"Step 1: First, combine the items: {_fmt(a)} + {_fmt(b)} = {_fmt(a + b)}.", 12, 0.25))
+            elif len(prob_nums) == 2:
+                a, b = prob_nums[0], prob_nums[1]
+                candidates.append(_make_candidate(f"Step 1: Calculate {_fmt(a)} + {_fmt(b)} = {_fmt(a + b)}.", 12, 0.80))
+                candidates.append(_make_candidate(f"Step 1: Inaccurate subtotal: {_fmt(a)} + {_fmt(b)} = {_fmt(a + b + 5)}.", 12, 0.20))
+            else:
+                candidates.append(_make_candidate("Step 1: Initialize baseline quantity: 10 + 10 = 20.", 10, 0.80))
+                candidates.append(_make_candidate("Step 1: Flawed baseline: 10 * 10 = 150.", 10, 0.20))
+            return candidates[:branching_factor]
+
+        elif step_idx == 2:
+            prev_subtotal = hist_nums[-1] if hist_nums else (prob_nums[0] if prob_nums else 20.0)
+            base_val = prob_nums[0] if prob_nums else 10.0
+            total = base_val + prev_subtotal
+            candidates.append(_make_candidate(f"Step 2: Add remaining amount: {_fmt(base_val)} + {_fmt(prev_subtotal)} = {_fmt(total)}.", 12, 0.80))
+            candidates.append(_make_candidate(f"Step 2: Computational drift: {_fmt(base_val)} + {_fmt(prev_subtotal)} = {_fmt(total + 10)}.", 12, 0.20))
+            return candidates[:branching_factor]
 
         return candidates[:branching_factor]
