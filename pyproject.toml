@@ -12,7 +12,37 @@ license = {text = "MIT"}
 authors = [
     {name = "Hrushikesh Ramilla", email = "ramillahrushikesh@gmail.com"}
 ]
+keywords = [
+    "test-time-compute",
+    "mcts",
+    "process-reward-models",
+    "speculative-decoding",
+    "kv-cache-optimization",
+    "reasoning-scaling",
+    "llm-inference"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Programming Language :: Python :: 3",
+]
 dependencies = [
     "numpy>=1.20.0",
     "torch>=2.0.0",
+    "transformers>=4.36.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov",
+]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --durations=10"
+testpaths = [
+    "tests",
+]
+pythonpath = ["."]
