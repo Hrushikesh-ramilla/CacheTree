@@ -42,3 +42,64 @@ class KVExactnessCertificate:
     proof_statement: str
 
 
+def verify_tree_consistency(tree: ThoughtTree) -> TreeConsistencyCertificate:
+    """
+    Formally verifies that the MCTS tree satisfies structural and mathematical invariants:
+    1. Acyclicity: No cycles in parent pointers.
+    2. Topological order: parent_id < child_id.
+    3. Monotonic visit conservation: parent.visits >= sum(child.visits).
+    4. Bounded Q-values: q_value in [0, 1] for all nodes.
+    """
+    total_nodes = len(tree.nodes)
+    max_depth = max(n.depth for n in tree.nodes.values()) if total_nodes > 0 else 0
+
+    # 1. Acyclicity check
+    is_acyclic = True
+    for node_id, node in tree.nodes.items():
+        visited_ids = set()
+        curr: Optional[int] = node_id
+        while curr is not None:
+            if curr in visited_ids:
+                is_acyclic = False
+                break
+            visited_ids.add(curr)
+            curr = tree.nodes[curr].parent_id
+
+    # 2. Topological order
+    is_topo = all(
+        node.parent_id is None or node.parent_id < node.node_id
+        for node in tree.nodes.values()
+    )
+
+    # 3. Visit conservation
+    visit_conservation = True
+    for node in tree.nodes.values():
+        if node.children_ids:
+            children_visits = sum(tree.nodes[cid].visits for cid in node.children_ids)
+            # In MCTS, parent visits are incremented whenever any child is visited + root init
+            if node.visits < children_visits:
+                visit_conservation = False
+                break
+
+    # 4. Q-bounds validation
+    q_bounds = all(0.0 <= n.q_value <= 1.0 + 1e-7 for n in tree.nodes.values())
+
+    is_valid = is_acyclic and is_topo and visit_conservation and q_bounds
+    summary = (
+        f"Tree Consistency Proof: is_valid={is_valid} | "
+        f"acyclic={is_acyclic}, topo={is_topo}, "
+        f"visit_conservation={visit_conservation}, q_bounded={q_bounds} "
+        f"(N={total_nodes}, depth={max_depth})"
+    )
+
+    return TreeConsistencyCertificate(
+        is_valid=is_valid,
+        is_acyclic=is_acyclic,
+        is_topologically_ordered=is_topo,
+        visit_conservation_holds=visit_conservation,
+        q_bounds_valid=q_bounds,
+        total_nodes=total_nodes,
+        max_depth=max_depth,
+        proof_summary=summary,
+    )
+
