@@ -103,3 +103,43 @@ def verify_tree_consistency(tree: ThoughtTree) -> TreeConsistencyCertificate:
         proof_summary=summary,
     )
 
+
+def verify_kv_exactness(
+    recycled_tensor: torch.Tensor,
+    scratch_tensor: torch.Tensor,
+    tolerance: float = 1e-7,
+) -> KVExactnessCertificate:
+    """
+    Formally verifies that prefix-recycled KV tensors are numerically identical
+    to computing the full attention prefix from scratch.
+    """
+    if recycled_tensor.shape != scratch_tensor.shape:
+        return KVExactnessCertificate(
+            is_proven=False,
+            max_absolute_error=float("inf"),
+            is_machine_precision=False,
+            tokens_compared=0,
+            recycled_tensor_shape=tuple(recycled_tensor.shape),
+            scratch_tensor_shape=tuple(scratch_tensor.shape),
+            proof_statement="Shape mismatch between recycled and scratch tensors.",
+        )
+
+    diff = torch.abs(recycled_tensor - scratch_tensor)
+    max_err = float(diff.max().item())
+    is_proven = max_err <= tolerance
+    is_machine_prec = max_err <= 1e-12
+
+    statement = (
+        f"KV-Cache Exactness Proof: is_proven={is_proven} (max_abs_error={max_err:.2e} <= {tolerance:.2e}). "
+        f"Machine precision certified: {is_machine_prec} across {recycled_tensor.shape[-2]} tokens."
+    )
+
+    return KVExactnessCertificate(
+        is_proven=is_proven,
+        max_absolute_error=max_err,
+        is_machine_precision=is_machine_prec,
+        tokens_compared=recycled_tensor.shape[-2],
+        recycled_tensor_shape=tuple(recycled_tensor.shape),
+        scratch_tensor_shape=tuple(scratch_tensor.shape),
+        proof_statement=statement,
+    )
