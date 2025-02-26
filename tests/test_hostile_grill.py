@@ -86,3 +86,97 @@ class TestHostileTreeAndUCTAttacks:
         assert c1.node_id not in path
         assert c1_sub.node_id not in path
 
+
+class TestHostilePRMAttacks:
+    """Attacks on Process Reward Model arithmetic and parsing bounds."""
+
+    def test_adversarial_arithmetic_overflow(self):
+        """Attack: Floating point overflow strings (1e308 * 10). Must not crash with OverflowError."""
+        prm = RuleBasedMathPRM()
+        eval_res = prm.evaluate_step(
+            problem="Overflow",
+            reasoning_history="",
+            current_step="Compute 1e308 * 10 = 1e309",
+        )
+        assert isinstance(eval_res.score, float)
+        assert not math.isnan(eval_res.score)
+
+    def test_homoglyph_and_garbage_math_caught(self):
+        """Attack: Homoglyphs and corrupted equations."""
+        prm = RuleBasedMathPRM()
+        # Empty / whitespace step
+        eval_empty = prm.evaluate_step("Prob", "", "   ")
+        assert eval_empty.is_fatal is True
+        assert eval_empty.score <= 0.10
+
+    def test_negative_zero_division(self):
+        """Attack: Negative zero division."""
+        prm = RuleBasedMathPRM()
+        eval_neg0 = prm.evaluate_step("Prob", "", "10 / -0.0 = 0")
+        assert eval_neg0.is_fatal is True
+        assert "division by zero" in eval_neg0.rationale.lower()
+
+
+class TestHostileKVCacheAttacks:
+    """Attacks on KV-Cache memory capacity, multi-head tensor dimensions, and LCA."""
+
+    def test_lru_eviction_under_high_node_pressure(self):
+        """Attack: Push 500 nodes into a cache capped at 50 entries."""
+        mgr = TreeKVCacheManager(max_cached_nodes=50)
+        for i in range(500):
+            mgr.store_cache(node_id=i, token_count=i + 1)
+
+        summary = mgr.get_summary()
+        # Active cached nodes must never exceed max_cached_nodes
+        assert summary["active_cached_nodes"] == 50
+        # The oldest node (0) must have been evicted
+        assert mgr.get_cache(0) is None
+        # The newest node (499) must be retained
+        assert mgr.get_cache(499) is not None
+
+    def test_4d_multi_head_attention_kv_exactness_proof(self):
+        """
+        Proof Duel Attack: Verify exactness across batch=2, heads=8, dim=64 (Llama-style).
+        Demands KVExactnessCertificate with error < 1e-12.
+        """
+        batch = 2
+        heads = 8
+        head_dim = 64
+        seq_len = 128
+        prefix = 96
+        delta = 32
+
+        torch.manual_seed(1337)
+        hidden = heads * head_dim
+        W = torch.randn(hidden, hidden, dtype=torch.float64)
+
+        tokens = torch.randn(batch, seq_len, hidden, dtype=torch.float64)
+        t_prefix = tokens[:, :prefix, :]
+        t_delta = tokens[:, prefix:, :]
+
+        # Full scratch
+        k_scratch = torch.matmul(tokens, W).view(batch, seq_len, heads, head_dim).transpose(1, 2)
+
+        # Recycled
+        k_p = torch.matmul(t_prefix, W).view(batch, prefix, heads, head_dim).transpose(1, 2)
+        k_d = torch.matmul(t_delta, W).view(batch, delta, heads, head_dim).transpose(1, 2)
+        k_recycled = torch.cat([k_p, k_d], dim=2)
+
+        cert = verify_kv_exactness(k_recycled, k_scratch)
+        assert cert.is_proven is True
+        assert cert.is_machine_precision is True
+        assert cert.max_absolute_error < 1e-12
+        assert cert.tokens_compared == seq_len
+
+    def test_lca_on_disjoint_or_deeply_skewed_trees(self):
+        """Attack: Skewed line tree (depth 20) LCA calculation."""
+        tree = ThoughtTree(root_prompt="Root")
+        curr = tree.root_id
+        for i in range(20):
+            node = tree.add_child(curr, f"step_{i}", [i])
+            curr = node.node_id
+
+        # LCA of deepest node (20) and root (0) must be root (0)
+        assert tree.lowest_common_ancestor(20, 0) == 0
+        # LCA of node 15 and node 10 must be 10
+        assert tree.lowest_common_ancestor(15, 10) == 10
