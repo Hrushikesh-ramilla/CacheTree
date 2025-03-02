@@ -26,5 +26,34 @@ from .engine import (
     EngineConfig,
     ReasoningResult,
 )
+from .proofs import (
+    TreeConsistencyCertificate,
+    KVExactnessCertificate,
+    verify_tree_consistency,
+    verify_kv_exactness,
+)
 
 __version__ = "0.1.0"
+
+__all__ = [
+    "StepNode",
+    "ThoughtTree",
+    "NodeStatus",
+    "UCTConfig",
+    "ProcessRewardModel",
+    "StepVerdict",
+    "StepEvaluation",
+    "RuleBasedMathPRM",
+    "HybridMathPRM",
+    "TreeKVCacheManager",
+    "KVCacheEntry",
+    "TokenRecyclingBuffer",
+    "RecyclingStats",
+    "TestTimeComputeEngine",
+    "EngineConfig",
+    "ReasoningResult",
+    "TreeConsistencyCertificate",
+    "KVExactnessCertificate",
+    "verify_tree_consistency",
+    "verify_kv_exactness",
+]
