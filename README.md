@@ -54,3 +54,9 @@ In multi-step reasoning, test-time compute models explore branching thoughts and
   $$\text{Efficiency} = \frac{\text{Tokens Saved}}{\text{Naive Tokens}} = 1 - \frac{\sum |\Delta \mathbf{t}_{v_k}|}{\sum (L_u + |\Delta \mathbf{t}_{v_k}|)} \ge 80\%$$
 
 ### 4. Machine-Precision Exactness Proof Certification
+- Formally certifies that prefix-recycled attention keys and values are mathematically identical to full-recomputation:
+  $$\max_{i} \|\mathbf{KV}_{\text{recycled}}[i] - \mathbf{KV}_{\text{scratch}}[i]\|_\infty < 10^{-12}$$
+  Guarantees zero numerical drift or causal leakage.
+
+---
+
