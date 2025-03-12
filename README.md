@@ -2,6 +2,8 @@
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![KV Recycling](https://img.shields.io/badge/KV%20Recycling-81.26%25-brightgreen.svg)](#empirical-benchmark-token-economics--kv-cache-prefix-recycling)
+[![Inference Speedup](https://img.shields.io/badge/Speedup-5.34x-orange.svg)](#empirical-benchmark-token-economics--kv-cache-prefix-recycling)
 
 > **CacheTree** is a test-time compute scaling engine that enables LLMs to explore step-by-step reasoning trees (OpenAI o1 / tree-of-thought style) using Monte Carlo Tree Search (MCTS) and Process Reward Models (PRM), while eliminating redundant forward-pass compute through **tree-structured KV-cache prefix recycling**.
 
@@ -57,6 +59,38 @@ In multi-step reasoning, test-time compute models explore branching thoughts and
 - Formally certifies that prefix-recycled attention keys and values are mathematically identical to full-recomputation:
   $$\max_{i} \|\mathbf{KV}_{\text{recycled}}[i] - \mathbf{KV}_{\text{scratch}}[i]\|_\infty < 10^{-12}$$
   Guarantees zero numerical drift or causal leakage.
+
+---
+
+## Empirical Benchmark: Token Economics & KV-Cache Prefix Recycling
+
+Evaluated across problems from the **OpenAI GSM8K** dataset (`Cobbe et al., 2021`):
+
+### 1. Token Recycling Efficiency (100 Problems)
+Profiles prefix token reuse, LCA rewinding, and PRM early-stopping across multi-branch reasoning trees:
+
+| Metric | Naive Full Recomputation | CacheTree (Prefix KV Recycling) |
+| :--- | :--- | :--- |
+| **Total Prompt & Prefix Tokens** | 37,338 tokens | **6,996 tokens** |
+| **Tokens Saved via Recycling** | 0 tokens (0.0%) | **30,342 tokens** |
+| **Token Recycling Efficiency** | 0.0% | **81.26%** |
+| **Compute Speedup Factor** | 1.00x (Baseline) | **5.34x Speedup** |
+| **Flawed Branches Pruned Early** | 0 branches | **78 dead-ends cut** |
+
+*Measured using `benchmarks/run_gsm8k_benchmark.py`. Structured metrics saved to `benchmarks/benchmark_results.json`.*
+
+### 2. Live Neural Model Inference (Qwen2.5-0.5B-Instruct on GPU)
+Evaluates live GPU inference forward passes on real transformer weights (`Qwen/Qwen2.5-0.5B-Instruct`) with HuggingFace `DynamicCache` prefix recycling:
+
+| Live Neural Metric | Naive Recomputation | CacheTree Live |
+| :--- | :--- | :--- |
+| **Neural Forward Passes** | 10 passes | **10 passes** |
+| **Prefix Tokens Recomputed** | 458 tokens | **130 tokens** |
+| **Tokens Saved via DynamicCache** | 0 tokens | **328 tokens** |
+| **Live Recycling Efficiency** | 0.0% | **71.62%** |
+| **LCA Tree Rewind Operations** | 0 | **4 rewinds** |
+
+*Measured using `benchmarks/run_live_qwen.py` on NVIDIA GeForce RTX 3050 Laptop GPU.*
 
 ---
 
