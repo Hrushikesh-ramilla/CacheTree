@@ -132,4 +132,96 @@ def run_benchmark(dataset_path: str, max_items: int = 100, use_live: bool = Fals
         if naive_pred is not None and abs(naive_pred - gt) < 1e-4:
             naive_correct += 1
 
-    print(f"Baseline Accuracy: {naive_correct / max(1, len(questions)):.2%}")
+        # 2. CacheTree: PRM-guided MCTS with KV-cache recycling
+        engine = TestTimeComputeEngine(
+            config=EngineConfig(
+                max_search_rounds=8,
+                branching_factor=2,
+                pruning_threshold=0.20,
+                early_stop_on_success=True,
+            )
+        )
+
+        if use_live:
+            proposer_mcts = HuggingFaceStepProposer(
+                model=model,
+                tokenizer=tokenizer,
+                device=device,
+                max_step_tokens=32,
+                kv_manager=engine.kv_manager,
+            )
+        else:
+            proposer_mcts = calibrated_gen
+
+        res = engine.solve(problem=q, step_proposer_fn=proposer_mcts, initial_tokens=list(range(len(q.split()))))
+
+        pred = parse_numeric_answer(res.best_solution) if res.best_solution else None
+        if pred is not None and abs(pred - gt) < 1e-4:
+            recycler_correct += 1
+
+        # Accumulate compute metrics
+        metrics = res.recycling_metrics
+        total_tokens_unrecycled += metrics["total_tokens_without_recycling"]
+        total_tokens_recycled += metrics["tokens_computed_with_recycling"]
+        total_pruned_branches += res.pruned_branches_count
+        total_search_rounds += res.total_search_rounds
+
+    elapsed = time.time() - start_bench
+    n = len(items)
+
+    naive_acc = (naive_correct / n) * 100.0
+    recycler_acc = (recycler_correct / n) * 100.0
+    tokens_saved = max(0, total_tokens_unrecycled - total_tokens_recycled)
+    efficiency_pct = (tokens_saved / max(1, total_tokens_unrecycled)) * 100.0
+    speedup_ratio = total_tokens_unrecycled / max(1, total_tokens_recycled)
+
+    print("\n" + "-" * 80)
+    print("BENCHMARK RESULTS SUMMARY:")
+    print("-" * 80)
+    print(f"Total GSM8K Problems Evaluated:           {n}")
+    print(f"Baseline LLM Accuracy (Single Pass):       {naive_acc:.1f}%")
+    print(f"CacheTree Accuracy (PRM MCTS):       {recycler_acc:.1f}%")
+    print(f"Absolute Accuracy Improvement:             +{recycler_acc - naive_acc:.1f}%")
+    print(f"Total Naive Tokens (Full Re-computation):  {total_tokens_unrecycled:,}")
+    print(f"Actual Tokens Computed (With Recycling):   {total_tokens_recycled:,}")
+    print(f"Tokens Saved via Prefix KV-Recycling:      {tokens_saved:,}")
+    print(f"Empirical Token Recycling Efficiency:      {efficiency_pct:.2f}%")
+    print(f"Inference Compute Speedup Factor:          {speedup_ratio:.2f}x")
+    print(f"Flawed Derivation Branches Pruned Early:   {total_pruned_branches}")
+    print(f"Evaluation Time:                           {elapsed:.2f}s")
+    print("=" * 80)
+
+    summary_dict = {
+        "dataset": "OpenAI GSM8K (Cobbe et al., 2021)",
+        "eval_mode": "neural_live" if use_live else "simulated_profiling",
+        "num_questions": n,
+        "baseline_accuracy_pct": round(naive_acc, 2),
+        "cache_tree_accuracy_pct": round(recycler_acc, 2),
+        "accuracy_boost_pct": round(recycler_acc - naive_acc, 2),
+        "total_naive_tokens": total_tokens_unrecycled,
+        "tokens_computed_with_recycling": total_tokens_recycled,
+        "tokens_saved": tokens_saved,
+        "recycling_efficiency_pct": round(efficiency_pct, 2),
+        "speedup_factor": round(speedup_ratio, 2),
+        "pruned_branches_count": total_pruned_branches,
+        "elapsed_seconds": round(elapsed, 2),
+    }
+
+    out_name = "benchmark_results_live.json" if use_live else "benchmark_results.json"
+    out_path = os.path.join(os.path.dirname(__file__), out_name)
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(summary_dict, f, indent=2)
+    print(f"Structured results written to: {out_path}\n")
+
+    return summary_dict
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="CacheTree GSM8K Benchmark")
+    parser.add_argument("--max-items", type=int, default=100, help="Max GSM8K questions to test")
+    parser.add_argument("--live", action="store_true", help="Run live neural inference using Qwen2.5-0.5B-Instruct")
+    args = parser.parse_args()
+
+    data_file = os.path.join(os.path.dirname(__file__), "data", "gsm8k.json")
+    run_benchmark(data_file, max_items=args.max_items, use_live=args.live)

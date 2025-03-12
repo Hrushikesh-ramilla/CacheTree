@@ -1,0 +1,14 @@
+{
+  "dataset": "OpenAI GSM8K (Cobbe et al., 2021)",
+  "num_questions": 100,
+  "baseline_accuracy_pct": 3.0,
+  "cache_tree_accuracy_pct": 3.0,
+  "accuracy_boost_pct": 0.0,
+  "total_naive_tokens": 37338,
+  "tokens_computed_with_recycling": 6996,
+  "tokens_saved": 30342,
+  "recycling_efficiency_pct": 81.26,
+  "speedup_factor": 5.34,
+  "pruned_branches_count": 78,
+  "elapsed_seconds": 0.49
+}
