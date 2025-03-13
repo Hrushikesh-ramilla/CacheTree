@@ -94,3 +94,81 @@ Evaluates live GPU inference forward passes on real transformer weights (`Qwen/Q
 
 ---
 
+## Repository Structure
+
+```
+CacheTree/
+├── pyproject.toml              # Packaging and dependency specifications
+├── README.md                   # System documentation and empirical proofs
+├── cache_tree/
+│   ├── __init__.py             # Public API exports
+│   ├── tree.py                 # StepNode, ThoughtTree, UCT with min-max normalization
+│   ├── prm.py                  # ProcessRewardModel, StepVerdict, RuleBasedMathPRM
+│   ├── recycler.py             # TreeKVCacheManager, TokenRecyclingBuffer, LCA rewinding
+│   ├── engine.py               # TestTimeComputeEngine orchestrating search & recycling
+│   └── proofs.py               # Formal TreeConsistency and KVExactness proof certificates
+├── tests/
+│   ├── test_tree.py            # UCT invariants, tree topology, LCA, trajectory selection
+│   ├── test_prm.py             # Arithmetic verification, fatal error detection, terminal answers
+│   ├── test_recycler.py        # KV-cache token accounting, savings ratio, buffer drafting
+│   ├── test_engine.py          # End-to-end multi-step reasoning with branch pruning
+│   ├── test_proofs.py          # Machine-precision KV identity (< 1e-12) & tree consistency
+│   └── test_hostile_grill.py   # Red-team attacks: negative zero, UCT div0, LRU stress, cycles
+└── benchmarks/
+    ├── data/
+    │   └── gsm8k.json          # Official 1,319-question OpenAI GSM8K test set
+    └── run_gsm8k_benchmark.py  # Empirical benchmark script comparing accuracy and token savings
+```
+
+---
+
+## Quickstart
+
+### 1. Installation
+
+```bash
+git clone https://github.com/Hrushikesh-ramilla/CacheTree.git
+cd CacheTree
+pip install -e .
+```
+
+### 2. Python API
+
+```python
+from cache_tree import (
+    TestTimeComputeEngine,
+    EngineConfig,
+    RuleBasedMathPRM,
+    TreeKVCacheManager,
+)
+
+# Initialize engine with step-level PRM and KV-cache recycling
+engine = TestTimeComputeEngine(
+    config=EngineConfig(
+        max_search_rounds=15,
+        branching_factor=3,
+        pruning_threshold=0.20,
+    )
+)
+
+problem = "Janet has 16 eggs. She buys 3 packs of 12 eggs. She uses 4 eggs to bake. How many are left?"
+
+# Run search over thoughts
+result = engine.solve(problem=problem, step_proposer_fn=my_step_proposer)
+
+print(f"Solution: {result.best_solution}")
+print(f"Recycling Efficiency: {result.recycling_metrics['recycling_efficiency_pct']}%")
+print(f"Tokens Saved: {result.recycling_metrics['tokens_saved']}")
+```
+
+### 3. Running Verification & Proof Suite
+
+```bash
+# Run all 37 unit, invariant, and hostile red-team tests
+python -m pytest tests/
+
+# Run official GSM8K benchmark
+python benchmarks/run_gsm8k_benchmark.py
+```
+
+---
