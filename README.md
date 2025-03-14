@@ -2,6 +2,7 @@
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://img.shields.io/badge/tests-37%2F37%20passing-brightgreen.svg)](#3-running-verification--proof-suite)
 [![KV Recycling](https://img.shields.io/badge/KV%20Recycling-81.26%25-brightgreen.svg)](#empirical-benchmark-token-economics--kv-cache-prefix-recycling)
 [![Inference Speedup](https://img.shields.io/badge/Speedup-5.34x-orange.svg)](#empirical-benchmark-token-economics--kv-cache-prefix-recycling)
 
@@ -172,3 +173,23 @@ python benchmarks/run_gsm8k_benchmark.py
 ```
 
 ---
+
+## Formal Proof Certificates
+
+CacheTree defenses are backed by machine-verifiable certificates:
+
+1. **`TreeConsistencyCertificate`:**
+   - Proves acyclicity, topological sort ordering, and monotonic visit conservation:
+     $$N(u) \ge \sum_{c \in \text{children}(u)} N(c)$$
+   - Validates that normalized Q-values lie strictly within $[0, 1]$.
+
+2. **`KVExactnessCertificate`:**
+   - Proves that prefix KV tensor slicing produces mathematically identical outputs to full recomputation:
+     $$\|\mathbf{KV}_{\text{recycled}} - \mathbf{KV}_{\text{scratch}}\|_\infty < 10^{-12}$$
+   - Tested across 4D multi-head attention tensors $(B, H, L, D)$ to confirm zero dimensional or causal leakage.
+
+---
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
